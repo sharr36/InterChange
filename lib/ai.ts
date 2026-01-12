@@ -192,3 +192,48 @@ Return JSON: {"compatible": true/false, "confidence": 0.95, "compatibilityType":
     throw error;
   }
 }
+
+export async function extractPartDataFromText(text: string) {
+  const prompt = `Extract structured part information from this text:
+
+"${text}"
+
+Return a JSON object with this structure:
+{
+  "partNumber": "string or null",
+  "manufacturer": "string or null",
+  "description": "string",
+  "category": "string or null",
+  "specifications": {
+    // any key-value pairs found
+  }
+}
+
+Be thorough in extracting specifications like dimensions, ratings, materials, etc.`;
+
+  try {
+    const message = await anthropic.messages.create({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 1000,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    const content = message.content[0];
+    if (content.type === "text") {
+      const jsonMatch = content.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("AI text extraction error:", error);
+    return null;
+  }
+}
