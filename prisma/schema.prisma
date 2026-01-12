@@ -1,0 +1,231 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+enum PartStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PostStatus {
+  ACTIVE
+  LOCKED
+  DELETED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  role          UserRole  @default(USER)
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  parts         Part[]
+  posts         Post[]
+  comments      Comment[]
+  sessions      Session[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  slug        String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parts       Part[]
+  subCategories SubCategory[]
+}
+
+model SubCategory {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  slug        String
+  categoryId  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  parts       Part[]
+
+  @@unique([categoryId, slug])
+  @@index([categoryId])
+}
+
+model Part {
+  id              String     @id @default(cuid())
+  partNumber      String     @unique
+  manufacturerPartNumber String?
+  manufacturer    String
+  description     String
+  category        Category   @relation(fields: [categoryId], references: [id])
+  categoryId      String
+  subCategory     SubCategory? @relation(fields: [subCategoryId], references: [id])
+  subCategoryId   String?
+
+  // Technical specifications
+  specifications  Json?      // Flexible JSON for various specs (size, micron, dimensions, etc.)
+  weight          Float?
+  dimensions      String?    // e.g., "10x5x3 cm"
+
+  // Images
+  images          String[]   // Array of image URLs
+
+  // Status and metadata
+  status          PartStatus @default(PENDING)
+  createdBy       User       @relation(fields: [createdById], references: [id])
+  createdById     String
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  // Relations
+  crossReferences CrossReference[] @relation("OriginalPart")
+  equivalents     CrossReference[] @relation("EquivalentPart")
+  compatibilities Compatibility[]  @relation("CompatiblePart")
+  compatibleWith  Compatibility[]  @relation("CompatibleWithPart")
+
+  @@index([categoryId])
+  @@index([subCategoryId])
+  @@index([createdById])
+  @@index([manufacturer])
+  @@index([status])
+}
+
+model CrossReference {
+  id              String   @id @default(cuid())
+  originalPartId  String
+  equivalentPartId String
+  confidence      Float    @default(1.0) // AI confidence score 0-1
+  notes           String?
+  verifiedBy      String?  // User ID who verified
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  originalPart    Part     @relation("OriginalPart", fields: [originalPartId], references: [id], onDelete: Cascade)
+  equivalentPart  Part     @relation("EquivalentPart", fields: [equivalentPartId], references: [id], onDelete: Cascade)
+
+  @@unique([originalPartId, equivalentPartId])
+  @@index([originalPartId])
+  @@index([equivalentPartId])
+}
+
+model Compatibility {
+  id                String   @id @default(cuid())
+  partId            String
+  compatibleWithId  String
+  compatibilityType String   // e.g., "fits", "replaces", "works_with"
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  part              Part     @relation("CompatiblePart", fields: [partId], references: [id], onDelete: Cascade)
+  compatibleWith    Part     @relation("CompatibleWithPart", fields: [compatibleWithId], references: [id], onDelete: Cascade)
+
+  @@unique([partId, compatibleWithId, compatibilityType])
+  @@index([partId])
+  @@index([compatibleWithId])
+}
+
+// Forum models
+model ForumCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  slug        String   @unique
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  posts       Post[]
+}
+
+model Post {
+  id              String        @id @default(cuid())
+  title           String
+  content         String
+  slug            String
+  status          PostStatus    @default(ACTIVE)
+  isPinned        Boolean       @default(false)
+  views           Int           @default(0)
+
+  authorId        String
+  author          User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  categoryId      String
+  category        ForumCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  comments        Comment[]
+
+  @@unique([slug, categoryId])
+  @@index([authorId])
+  @@index([categoryId])
+  @@index([status])
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  content     String
+
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  postId      String
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  parentId    String?  // For nested comments
+  parent      Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Comment[] @relation("CommentReplies")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([authorId])
+  @@index([postId])
+  @@index([parentId])
+}
+
+// Import tracking
+model ImportJob {
+  id          String   @id @default(cuid())
+  fileName    String
+  status      String   // "pending", "processing", "completed", "failed"
+  totalRows   Int      @default(0)
+  processedRows Int    @default(0)
+  errorRows   Int      @default(0)
+  errors      Json?    // Array of error messages
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+}
